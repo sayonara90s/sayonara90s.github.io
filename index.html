@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pong Wars</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" xintegrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #374151; /* Warna latar belakang */
+            color: #F3F4F6; /* Warna teks */
+        }
+        #gameCanvas {
+            border: 2px solid #4B5563; /* Warna border */
+            background-color: #1F2937; /* Warna latar belakang default jika gambar tidak dimuat */
+            border-radius: 0.5rem; /* Sudut membulat */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* Bayangan */
+        }
+        .score-container {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #4B5563; /* Warna latar belakang skor */
+            border-radius: 0.5rem; /* Sudut membulat */
+            font-size: 1.25rem; /* Ukuran font */
+            font-weight: 600; /* Ketebalan font */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* Bayangan */
+        }
+        .title {
+            font-size: 2.25rem; /* Ukuran font */
+            font-weight: 700; /* Ketebalan font */
+            margin-bottom: 1rem;
+            color: #E5E7EB; /* Warna teks judul */
+        }
+    </style>
+</head>
+<body class="d-flex flex-column align-items-center justify-content-center">
+    <h1 class="title">Perang Wilayah Canvas</h1>
+    <canvas id="gameCanvas"></canvas>
+    <div id="scoreDisplay" class="score-container">Day: 0 | Night: 0</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" xintegrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+
+    <script>
+        // --- PENGATURAN KUSTOM GAME ---
+        const gameSettings = {
+            canvas: {
+                width: 400,
+                height: 400,
+                cellSize: 40,
+            },
+            ball: {
+                radius: 18,
+                minSpeedComponent: 5.5,
+                maxSpeedComponent: 20.0,
+            },
+            playerDay: {
+                territoryColor: '#E0FBFC',
+                ballColor: '#293241',
+                type: 'day',
+            },
+            playerNight: {
+                territoryColor: '#293241',
+                ballColor: '#E0FBFC',
+                type: 'night',
+            },
+            // URL gambar latar belakang John Wick
+            backgroundImageUrl: 'https://progres.id/wp-content/uploads/2023/07/john-wick-keanu-reeves.webp'
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+
+        canvas.width = gameSettings.canvas.width;
+        canvas.height = gameSettings.canvas.height;
+
+        const cellSize = gameSettings.canvas.cellSize;
+        const cols = Math.floor(canvas.width / cellSize);
+        const rows = Math.floor(canvas.height / cellSize);
+        let grid = [];
+        let scores = {
+            [gameSettings.playerDay.type]: 0,
+            [gameSettings.playerNight.type]: 0
+        };
+        let balls = [];
+
+        // Objek gambar latar belakang
+        let backgroundImage = new Image();
+        let isBackgroundImageLoaded = false;
+
+        // Atur event onload untuk gambar latar belakang
+        backgroundImage.onload = () => {
+            isBackgroundImageLoaded = true;
+            // Panggil initGame setelah gambar dimuat untuk memastikan semuanya siap
+            initGame();
+        };
+        // Atur sumber gambar. Ini akan memicu event onload.
+        backgroundImage.src = gameSettings.backgroundImageUrl;
+        // Fallback jika gambar gagal dimuat
+        backgroundImage.onerror = () => {
+            console.error("Gagal memuat gambar latar belakang. Menggunakan latar belakang solid.");
+            isBackgroundImageLoaded = false;
+            initGame(); // Tetap mulai game meskipun gambar gagal dimuat
+        };
+
+
+        /**
+         * Mengkonversi warna heksadesimal ke format RGBA.
+         * @param {string} hex - Kode warna heksadesimal (misal: '#RRGGBB').
+         * @param {number} alpha - Nilai opasitas (0.0 hingga 1.0).
+         * @returns {string} Warna dalam format RGBA (misal: 'rgba(255, 0, 0, 0.5)').
+         */
+        function hexToRgba(hex, alpha) {
+            let r = 0, g = 0, b = 0;
+            // Menangani format #RRGGBB atau #RGB
+            if (hex.length === 7) { // #RRGGBB
+                r = parseInt(hex.slice(1, 3), 16);
+                g = parseInt(hex.slice(3, 5), 16);
+                b = parseInt(hex.slice(5, 7), 16);
+            } else if (hex.length === 4) { // #RGB
+                r = parseInt(hex[1] + hex[1], 16);
+                g = parseInt(hex[2] + hex[2], 16);
+                b = parseInt(hex[3] + hex[3], 16);
+            }
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        class Ball {
+            constructor(x, y, playerSettings) {
+                this.x = x;
+                this.y = y;
+                this.radius = gameSettings.ball.radius;
+                this.color = playerSettings.ballColor;
+                this.type = playerSettings.type;
+
+                const speedRange = gameSettings.ball.maxSpeedComponent - gameSettings.ball.minSpeedComponent;
+                const getSpeedComponent = () => (Math.random() * speedRange + gameSettings.ball.minSpeedComponent);
+
+                this.dx = (Math.random() < 0.5 ? -1 : 1) * getSpeedComponent();
+                this.dy = (Math.random() < 0.5 ? -1 : 1) * getSpeedComponent();
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            // Metode untuk menangani tabrakan dan konversi blok
+            handleCollisionAndConversion() {
+                const checkAndConvert = (targetX, targetY, isXAxisCheck) => {
+                    const col = Math.floor(targetX / cellSize);
+                    const row = Math.floor(targetY / cellSize);
+
+                    if (col >= 0 && col < cols && row >= 0 && row < rows) {
+                        if (grid[row][col] !== this.type && grid[row][col] !== undefined) {
+                            grid[row][col] = this.type;
+                            if (isXAxisCheck) {
+                                this.dx *= -1;
+                            } else {
+                                this.dy *= -1;
+                            }
+                        }
+                    }
+                };
+
+                // Deteksi tabrakan dengan blok lawan berdasarkan arah pergerakan
+                // Memeriksa tabrakan X-axis
+                checkAndConvert(this.x + (this.dx > 0 ? this.radius : -this.radius) + this.dx, this.y, true);
+                // Memeriksa tabrakan Y-axis
+                checkAndConvert(this.x, this.y + (this.dy > 0 ? this.radius : -this.radius) + this.dy, false);
+            }
+
+            // Metode untuk menangani tabrakan dengan dinding canvas
+            handleWallCollision() {
+                if (this.x + this.radius > canvas.width) {
+                    this.x = canvas.width - this.radius;
+                    this.dx *= -1;
+                } else if (this.x - this.radius < 0) {
+                    this.x = this.radius;
+                    this.dx *= -1;
+                }
+
+                if (this.y + this.radius > canvas.height) {
+                    this.y = canvas.height - this.radius;
+                    this.dy *= -1;
+                } else if (this.y - this.radius < 0) {
+                    this.y = this.radius;
+                    this.dy *= -1;
+                }
+            }
+
+            // Metode untuk mengkonversi blok di bawah pusat bola
+            convertCenterBlock() {
+                const centerCol = Math.floor(this.x / cellSize);
+                const centerRow = Math.floor(this.y / cellSize);
+
+                if (centerCol >= 0 && centerCol < cols && centerRow >= 0 && centerRow < rows) {
+                    if (grid[centerRow][centerCol] !== this.type) {
+                        grid[centerRow][centerCol] = this.type;
+                    }
+                }
+            }
+
+            update() {
+                this.handleCollisionAndConversion(); // Tangani tabrakan dengan blok dan pantulan
+                this.x += this.dx; // Pindahkan bola
+                this.y += this.dy;
+                this.handleWallCollision(); // Tangani tabrakan dengan dinding
+                this.convertCenterBlock(); // Konversi blok di bawah pusat bola
+            }
+        }
+
+        function initGrid() {
+            grid = Array(rows).fill(null).map((_, r) =>
+                Array(cols).fill(null).map((_, c) =>
+                    c < cols / 2 ? gameSettings.playerDay.type : gameSettings.playerNight.type
+                )
+            );
+        }
+
+        // Menggambar Grid dengan opasitas dinamis
+        function drawGrid() {
+            const dayScore = scores[gameSettings.playerDay.type];
+            const nightScore = scores[gameSettings.playerNight.type];
+
+            let dayOpacity = 1.0;
+            let nightOpacity = 1.0;
+
+            // Atur opasitas berdasarkan skor
+            if (dayScore < nightScore) {
+                dayOpacity = 0.5; // Day kalah, jadi transparan
+            } else if (nightScore < dayScore) {
+                nightOpacity = 0.5; // Night kalah, jadi transparan
+            }
+            // Jika skor sama, keduanya tetap 1.0 (normal)
+
+            const dayColorRgba = hexToRgba(gameSettings.playerDay.territoryColor, dayOpacity);
+            const nightColorRgba = hexToRgba(gameSettings.playerNight.territoryColor, nightOpacity);
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (grid[r][c] === gameSettings.playerDay.type) {
+                        ctx.fillStyle = dayColorRgba;
+                    } else if (grid[r][c] === gameSettings.playerNight.type) {
+                        ctx.fillStyle = nightColorRgba;
+                    }
+                    ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+                }
+            }
+        }
+
+        function updateScores() {
+            scores[gameSettings.playerDay.type] = 0;
+            scores[gameSettings.playerNight.type] = 0;
+            grid.forEach(row => {
+                row.forEach(cell => {
+                    if (cell === gameSettings.playerDay.type) {
+                        scores[gameSettings.playerDay.type]++;
+                    } else if (cell === gameSettings.playerNight.type) {
+                        scores[gameSettings.playerNight.type]++;
+                    }
+                });
+            });
+            scoreDisplay.textContent = `Day: ${scores[gameSettings.playerDay.type]} | Night: ${scores[gameSettings.playerNight.type]}`;
+        }
+
+        function initGame() {
+            initGrid();
+            balls = [
+                new Ball(canvas.width / 4, canvas.height / 2, gameSettings.playerDay),
+                new Ball(canvas.width * 3 / 4, canvas.height / 2, gameSettings.playerNight)
+            ];
+            updateScores();
+            // Hanya mulai game loop jika gambar sudah dimuat
+            // Jika gambar belum dimuat, game loop akan dimulai setelah onload
+            if (isBackgroundImageLoaded) {
+                gameLoop();
+            }
+        }
+
+        // Game Loop Utama
+        function gameLoop() {
+            // Hapus canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Gambar latar belakang terlebih dahulu jika sudah dimuat
+            if (isBackgroundImageLoaded) {
+                const imgWidth = backgroundImage.naturalWidth;
+                const imgHeight = backgroundImage.naturalHeight;
+                const canvasWidth = canvas.width;
+                const canvasHeight = canvas.height;
+
+                const imgAspectRatio = imgWidth / imgHeight;
+                const canvasAspectRatio = canvasWidth / canvasHeight;
+
+                let sx, sy, sWidth, sHeight; // Source rectangle (bagian dari gambar yang akan diambil)
+
+                if (imgAspectRatio > canvasAspectRatio) {
+                    // Gambar lebih lebar dari kanvas, potong kiri/kanan
+                    sHeight = imgHeight;
+                    sWidth = imgHeight * canvasAspectRatio;
+                    sx = (imgWidth - sWidth) / 2;
+                    sy = 0;
+                } else {
+                    // Gambar lebih tinggi dari kanvas, potong atas/bawah
+                    sWidth = imgWidth;
+                    sHeight = imgWidth / canvasAspectRatio;
+                    sx = 0;
+                    sy = (imgHeight - sHeight) / 2;
+                }
+                // Gambar bagian gambar yang sudah dipotong ke seluruh kanvas
+                ctx.drawImage(backgroundImage, sx, sy, sWidth, sHeight, 0, 0, canvasWidth, canvasHeight);
+            } else {
+                // Fallback warna solid jika gambar tidak dimuat
+                ctx.fillStyle = '#1F2937'; // Menggunakan warna dari bg-gray-800
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            drawGrid(); // drawGrid sekarang menangani opasitas
+            balls.forEach(ball => {
+                ball.update();
+                ball.draw();
+            });
+            updateScores();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Mulai game ketika halaman dimuat, tetapi tunggu gambar latar belakang dimuat
+        // initGame() dipanggil di dalam backgroundImage.onload atau backgroundImage.onerror
+        window.onload = () => {
+            // Jika gambar sudah dimuat (misalnya dari cache), langsung panggil initGame
+            if (backgroundImage.complete && backgroundImage.naturalWidth !== 0) {
+                isBackgroundImageLoaded = true;
+                initGame();
+            }
+            // Jika belum, initGame akan dipanggil oleh event onload/onerror
+        };
+    </script>
+</body>
+</html>
